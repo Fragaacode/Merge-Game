@@ -27,7 +27,7 @@ class MenuScene extends Phaser.Scene {
     // Cargar fondo
     this.load.image('bg', 'assets/images/fondo2.png');
   }
-
+forEach
   create() {
     const width = this.scale.width;
     const height = this.scale.height;
@@ -200,12 +200,26 @@ class GameScene extends Phaser.Scene {
         'assets/sounds/lvl' + i + '.mp3'
       );
     }
+    this.load.on('loaderror', (file) => {
+  console.error('🚨 ERROR CARGANDO:', file.key, file.url);  // ← Muestra QUÉ falla
+});
+this.load.on('filecomplete', (key) => {
+  if (key.startsWith('lvl')) console.log('✅ Cargado OK:', key);
+});
+this.load.on('complete', () => {
+  console.log('🔍 Todas texturas listas? lvl4:', this.textures.exists('lvl4'));
+});
     
   }
 
 
   create() {
-
+// Activar audio con primer toque
+this.input.once('pointerdown', () => {
+  if (this.sound.context.state === 'suspended') {
+    this.sound.context.resume();
+  }
+});
     const bg = this.add.image(this.scale.width / 2, this.scale.height / 2, 'bggame');
     bg.setDisplaySize(this.scale.width, this.scale.height);
     bg.setDepth(-10);
@@ -431,6 +445,10 @@ graphics.strokePath();
             });
           });
         }
+        maxLevel = 1;
+boxes.forEach(box => maxLevel = Math.max(maxLevel, box.level));
+if (currentBox) maxLevel = Math.max(maxLevel, currentBox.level);
+console.log('🔍 Restaurado maxLevel:', maxLevel);  // DEBUG
         currentBox = restoredCurrentBox;
         loaded = true;
         updateScoreText();
@@ -590,7 +608,7 @@ new Phaser.Game(config);
 // ===================
 
 function spawnNewBox(scene) {
-
+console.log('🔍 Spawn nuevo: maxLevel actual=', maxLevel);
   const level = getRandomLevel();
   const size = getSizeByLevel(level);
 
@@ -640,7 +658,7 @@ function tryMerge(scene, a, b) {
 
 
   const newLevel = a.level + 1;
-
+maxLevel = Math.max(maxLevel, newLevel);  // ← ACTUALIZA maxLevel YA
 
 // Detiene todos los sonidos activos (incluye merges anteriores, pero no rompe nada)
 scene.sound.stopAll();
@@ -678,7 +696,20 @@ if (scene.cache.audio.exists(newSoundKey)) {
 function createMergedBox(scene, x, y, level) {
 
   const size = getSizeByLevel(level);
-
+console.log(`🔍 Creando lvl${level}: textura OK?`, scene.textures.exists('lvl' + level));
+if (!scene.textures.exists('lvl' + level)) {
+  console.error('🚨 lvl' + level + ' NO CARGÓ! Usando lvl1 fallback.');
+  const fallbackBox = scene.matter.add.image(x, y, 'lvl1');  // ← Temporal para no invisible
+  fallbackBox.setDisplaySize(size, size);
+  fallbackBox.setCircle(size / 2);
+  // Copia el resto de props a fallbackBox...
+  fallbackBox.level = level;
+  fallbackBox.size = size;
+  fallbackBox.merging = false;
+  boxes.push(fallbackBox);
+  scene.time.delayedCall(0, () => makeCircleMask(scene, fallbackBox, size));
+  return;  // Salta el box roto
+}
   const box =
     scene.matter.add.image(x, y, 'lvl' + level);
 
@@ -708,22 +739,31 @@ function getSizeByLevel(level) {
 }
 
 
+/// 1. REEMPLAZÁ getRandomLevel() COMPLETA:
 function getRandomLevel() {
-
-  const maxDrop = Math.max(1, maxLevel - 1);
-
+  const spawnMax = Math.min(4, maxLevel);  // CAP 4, usa maxLevel actual
   let pool = [];
-
-  for (let i = 1; i <= maxDrop; i++) {
-
-    const w = Math.floor(20 / Math.pow(2, i - 1));
-
-    for (let j = 0; j < w; j++) {
+  for (let i = 1; i <= spawnMax; i++) {
+    const weight = Math.floor(20 / Math.pow(2, i - 1));  // lvl1:20x, lvl2:10x, lvl3:5x, lvl4:2x (raro!)
+    for (let j = 0; j < weight; j++) {
       pool.push(i);
     }
   }
+  console.log(`🔍 Spawn pool (max${spawnMax}): lvl1:${pool.filter(l=>l===1).length} lvl2:${pool.filter(l=>l===2).length} lvl3:${pool.filter(l=>l===3).length} lvl4:${pool.filter(l=>l===4).length}`);  // DEBUG
+  return Phaser.Utils.Array.GetRandom(pool) || 1;
+}
 
-  return Phaser.Utils.Array.GetRandom(pool);
+
+maxLevel = Math.max(maxLevel, newLevel);
+
+// 3. EN GameScene.create(): DESPUÉS del bloque if(state.boxes) { ... boxes.push(box); } 
+// (justo antes de "currentBox = restoredCurrentBox;")
+maxLevel = 1;
+boxes.forEach(box => {
+  maxLevel = Math.max(maxLevel, box.level);
+});
+if (currentBox) {
+  maxLevel = Math.max(maxLevel, currentBox.level);
 }
 
 
@@ -805,4 +845,7 @@ function saveGameState() {
     currentBoxIndex
   };
   localStorage.setItem('mergeGameState', JSON.stringify(state));
+}
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("./sw.js");
 }
